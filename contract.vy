@@ -4,8 +4,6 @@
 
 AddFriend: event({sender: indexed(address), friend: indexed(address)})
 
-
-
 friendlist: map(address, address[256])
 friendCount: map(address, int128)
 
@@ -18,4 +16,6 @@ def addFriend(friend: address):
     log.AddFriend(sender, friend)
 
 @public
-def getFriendList(src: address) -> address[256]
+def getFriendList(src: address) -> address[256]:
+    return self.friendlist[src]
+
