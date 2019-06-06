@@ -1,59 +1,44 @@
-from vyper import compiler
-from web3 import Web3
-from eth_tester import (
-    EthereumTester,
-)
-from web3.providers.eth_tester import (
-    EthereumTesterProvider,
-)
-from eth_tester.exceptions import (
-    TransactionFailed,
-)
+import pytest
 
-t = EthereumTester()
 
-def w3(tester):
-    def zero_gas_price_strategy(web3, transaction_params=None):
-        return 0  # zero gas price makes testing simpler.
-
-    w3 = Web3(EthereumTesterProvider(tester))
-    w3.eth.setGasPriceStrategy(zero_gas_price_strategy)
-    return w3
-
-def get_contract(w3, source_code, *args, **kwargs):
-    out = compiler.compile_code(
-        source_code,
-        ['abi', 'bytecode'],
-        interface_codes=kwargs.pop('interface_codes', None),
-    )
-    abi = out['abi']
-    bytecode = out['bytecode']
-    contract = w3.eth.contract(abi=abi, bytecode=bytecode)
-
-    value = kwargs.pop('value_in_eth', 0) * 10**18  # Handle deploying with an eth value.
-
-    c = w3.eth.contract(abi=abi, bytecode=bytecode)
-    deploy_transaction = c.constructor(*args)
-    tx_info = {
-        'from': w3.eth.accounts[0],
-        'value': value,
-        'gasPrice': 0,
-    }
-    tx_info.update(kwargs)
-    tx_hash = deploy_transaction.transact(tx_info)
-    address = w3.eth.getTransactionReceipt(tx_hash)['contractAddress']
-    contract = w3.eth.contract(
-        address,
-        abi=abi,
-        bytecode=bytecode,
-        ContractFactoryClass=VyperContract,
-    )
+@pytest.fixture
+def friend_contract(w3, get_contract):
+    with open('contract.vy') as f:
+        contract_code = f.read()
+        contract = get_contract(contract_code)
     return contract
 
-# Compile and Deploy contract to provisioned testchain
-# (e.g. run __init__ method) with given args (e.g. init_args)
-# from msg.sender = t.k1 (private key of address 1 in test acconuts)
-# and supply 1000 wei to the contract
-init_args = []
+def test_initial_state(w3, tester, friend_contract):
+    k1, k2, k3, k4, k5 = w3.eth.accounts[:5]
 
-contract = get_contract(w3, )
+    # Check beneficiary is correct
+    assert friend_contract is not None
+    assert friend_contract.listFriends(k1) == [None] * 256
+
+def test_add_friend(w3, tester, friend_contract, get_logs):
+    k1, k2, k3, k4, k5 = w3.eth.accounts[:5]
+    tx_hash = friend_contract.addFriend(k2, transact={'from':k3})
+    w3.testing.mine(1)
+
+    log = get_logs(tx_hash, friend_contract, "AddFriend")
+    assert log[0]["args"]["friend"] == k2
+    assert log[0]["args"]["sender"] == k3
+    
+    k3_friends = friend_contract.listFriends(k3)
+    assert k3_friends[0] == k2
+
+def test_double_add_friend(w3, tester, friend_contract, get_logs):
+    k1, k2, k3, k4, k5 = w3.eth.accounts[:5]
+    tx_hash = friend_contract.addFriend(k2, transact={'from':k3})
+    w3.testing.mine(1)
+
+    tx_hash = friend_contract.addFriend(k2, transact={'from':k3})
+    w3.testing.mine(1)
+
+    log = get_logs(tx_hash, friend_contract, "AddFriend")
+    assert len(log) == 0
+    
+    k3_friends = friend_contract.listFriends(k3)
+    assert k3_friends[0] == k2
+    assert k3_friends[1] == None
+    assert friend_contract.countFriends(k3) == 1
